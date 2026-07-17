@@ -1,4 +1,4 @@
-export interface Watchlistitem {
+export interface WatchlistItem {
     letterboxdSlug : string;
     title: string;
     year: number | null;
@@ -8,6 +8,7 @@ export interface TmdbMatch {
     tmdbId: number;
     matchedTitle: string;
     confidence: number;
+    posterUrl: string;
 }
 
 export interface ProviderInfo {
@@ -17,7 +18,7 @@ export interface ProviderInfo {
 }
 
 export interface MovieResult {
-    watchlistItem: Watchlistitem;
+    watchlistItem: WatchlistItem;
     tmdbMatch: TmdbMatch | null;
     providers: ProviderInfo[];
     availableOnUserPlatforms: boolean;

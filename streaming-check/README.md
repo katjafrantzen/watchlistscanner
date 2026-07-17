@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Letterboxd Streaming Check
 
-## Getting Started
+Next.js-App (TypeScript, App Router), die die Letterboxd-Watchlist eines Nutzers
+gegen die TMDB-Watch-Provider abgleicht, um zu zeigen, welche Filme über die
+eigenen Streaming-Abos verfügbar sind.
 
-First, run the development server:
+> **Hinweis:** Das Projekt befindet sich in einer frühen Aufbauphase. Die
+> Datenmodelle und ein erster Letterboxd-Parser stehen, die eigentliche App
+> (UI und API) ist aber noch nicht implementiert. Siehe [Aktueller Stand](#aktueller-stand).
+
+## Setup
+
+Voraussetzungen: Node.js (LTS) und npm.
 
 ```bash
+cd streaming-check
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Anschließend [http://localhost:3000](http://localhost:3000) im Browser öffnen.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Env-Variablen
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Für den geplanten TMDB-Abgleich wird ein TMDB API Key benötigt. Eine
+`.env.local` mit z.B. `TMDB_API_KEY=...` existiert im Repo noch nicht und wird
+vom Code aktuell auch noch nicht gelesen (siehe [Aktueller Stand](#aktueller-stand)).
 
-## Learn More
+## Verfügbare Skripte
 
-To learn more about Next.js, take a look at the following resources:
+| Skript          | Zweck                              |
+| --------------- | ---------------------------------- |
+| `npm run dev`   | Startet den Next.js-Dev-Server     |
+| `npm run build` | Erstellt den Produktions-Build     |
+| `npm run start` | Startet den Produktions-Server     |
+| `npm run lint`  | Führt ESLint aus                   |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Projektstruktur
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+streaming-check/
+├── app/                       # Next.js App Router
+│   ├── layout.tsx             # Root-Layout
+│   ├── page.tsx               # Startseite (aktuell noch die Default-Vorlage)
+│   └── globals.css            # globale Styles (Tailwind)
+├── lib/                       # Domänenlogik (Route Handler bleiben dünn)
+│   ├── types.ts               # zentrale TypeScript-Interfaces
+│   └── letterboxd/
+│       └── scraper.ts         # Parser für Letterboxd-Watchlist-Seiten
+├── public/                    # statische Assets
+├── package.json
+└── ...                        # Config (tsconfig, eslint, postcss, next.config)
+```
 
-## Deploy on Vercel
+Ein `components/`-Verzeichnis existiert noch nicht.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Datenmodell (`lib/types.ts`)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **`WatchlistItem`** – ein Film aus der Letterboxd-Watchlist (`letterboxdSlug`, `title`, `year`).
+- **`TmdbMatch`** – ein bei TMDB gefundener Treffer (`tmdbId`, `matchedTitle`, `confidence`, `posterUrl`).
+- **`ProviderInfo`** – ein Streaming-Anbieter (`providerName`, `providerId`, `type: "flat" | "rent" | "buy"`).
+- **`MovieResult`** – kombiniertes Ergebnis pro Film (Watchlist-Item, TMDB-Match, Provider-Liste, `availableOnUserPlatforms`).
+
+## API-Routen
+
+Aktuell existieren **keine** API-Routen. Es gibt kein `app/api/`-Verzeichnis und
+keine Route Handler. Sobald Routen hinzukommen, wird dieser Abschnitt mit Zweck,
+Request-Parametern und Response-Format je Route ergänzt.
+
+## Aktueller Stand
+
+**Funktioniert bereits:**
+
+- Next.js-Grundgerüst (TypeScript, App Router, Tailwind) ist aufgesetzt.
+- Das Datenmodell in `lib/types.ts` ist definiert.
+- `parseWatchlistPage(html)` in `lib/letterboxd/scraper.ts` parst **eine** HTML-Seite
+  der Letterboxd-Watchlist und liefert eine `WatchlistItem[]`-Liste (Titel und Jahr
+  werden aus dem `data-item-name`-Attribut getrennt).
+
+**Noch offen:**
+
+- Abrufen der Watchlist-HTML-Seiten (HTTP-Fetch) inkl. Paginierung über mehrere Seiten.
+- TMDB-Integration: Titel-Matching (`TmdbMatch`) und Watch-Provider-Abfrage (`ProviderInfo`).
+- Abgleich der Anbieter mit den Streaming-Abos des Nutzers (`availableOnUserPlatforms`).
+- API-Routen unter `app/api/`.
+- UI: `app/page.tsx` ist noch die unveränderte `create-next-app`-Vorlage.
+
+## Bekannte Einschränkungen
+
+- **Nur Einzelseiten-Parsing:** Der Scraper verarbeitet genau eine übergebene
+  HTML-Seite; es gibt weder einen HTTP-Abruf noch eine Paginierung.
+- **Kein Error-Handling nach außen:** Unparsbare Einträge werden übersprungen
+  bzw. per `console.warn` geloggt, aber nicht an eine aufrufende Schicht gemeldet.
+- **Kein Caching** von Letterboxd- oder TMDB-Daten.
+- **Robustheit gegenüber Letterboxd-HTML:** Das Parsen hängt an konkreten
+  Attributen (`data-component-class="LazyPoster"`, `data-item-slug`,
+  `data-item-name`); Änderungen am Letterboxd-Markup brechen den Parser.
