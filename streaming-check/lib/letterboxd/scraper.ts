@@ -41,3 +41,24 @@ export function parseWatchlistPage(html: string): WatchlistItem[] {
 
     return items;
 }
+
+export async function fetchWatchlistPage(username: string, page: number): Promise<string>{
+
+    //url zusammenbauen
+    const url = `https://letterboxd.com/${username}/watchlist/page/${page}/`;
+
+    //inhalt aus url abfragen
+    const response = await fetch(url, {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+    });
+
+    //checken, ob die antwort valide ist
+    if (!response.ok) {
+        throw new Error(`Failed to fetch watchlist page ${page} for ${username}: ${response.status}`);
+    }
+
+    const html = await response.text();
+    return html;
+}
