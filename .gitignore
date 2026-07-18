@@ -1,0 +1,8 @@
+# Das eigentliche Projekt liegt in streaming-check/ und hat eine eigene .gitignore.
+# Diese Datei hier fängt ab, was versehentlich im Repo-Root landet — z.B. wenn
+# npm-Befehle aus dem falschen Verzeichnis laufen.
+
+node_modules/
+
+# env files
+.env*
