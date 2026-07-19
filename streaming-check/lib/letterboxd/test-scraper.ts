@@ -1,9 +1,13 @@
-import { fetchWatchlistPage } from "./scraper";
+import { scrapeFullWatchlist } from "./scraper";
 
 async function main() {
-  const html = await fetchWatchlistPage("katjafrantzen", 1);
-  console.log("HTML length:", html.length);
-  console.log(html.slice(0, 500)); // erste 500 Zeichen zum Reinschauen
+  const items = await scrapeFullWatchlist("katjafrantzen");
+  console.log("Item count:" + items.length);
+  if (items.length > 0) {
+    console.log(items[items.length - 1].title);
+  } else {
+    console.log("No items found.");
+  }
 }
 
 main();

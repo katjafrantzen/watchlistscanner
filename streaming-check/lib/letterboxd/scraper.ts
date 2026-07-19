@@ -62,3 +62,32 @@ export async function fetchWatchlistPage(username: string, page: number): Promis
     const html = await response.text();
     return html;
 }
+
+const MAX_PAGES = 50;
+const DELAY_MS = 300;
+
+function delay(ms: number): Promise<void>{
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function scrapeFullWatchlist(username: string): Promise<WatchlistItem[]>{
+    const allItems: WatchlistItem[] = [];
+    let page = 1;
+
+    while( page <= MAX_PAGES) {
+        const html = await fetchWatchlistPage(username, page);
+        const items = parseWatchlistPage(html);
+
+        if(items.length === 0){
+            break;
+        }
+
+        allItems.push(...items);
+        page++;
+
+        if(items.length > 0){
+            await delay(DELAY_MS);
+        }
+    }
+    return allItems;
+}

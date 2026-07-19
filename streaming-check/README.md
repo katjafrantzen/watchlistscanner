@@ -5,9 +5,10 @@ gegen die TMDB-Watch-Provider abgleicht, um zu zeigen, welche Filme über die
 eigenen Streaming-Abos verfügbar sind.
 
 > **Hinweis:** Das Projekt befindet sich in einer frühen Aufbauphase. Die
-> Datenmodelle, ein erster Letterboxd-Parser und der HTTP-Abruf einer
-> Watchlist-Seite stehen, die eigentliche App (UI und API) ist aber noch nicht
-> implementiert. Siehe [Aktueller Stand](#aktueller-stand).
+> Datenmodelle und die komplette Scraper-Kette (HTTP-Abruf, Parsing, Paginierung
+> über alle Seiten) stehen und sind gegen echtes Letterboxd getestet; die
+> eigentliche App (UI und API) ist aber noch nicht implementiert. Siehe
+> [Aktueller Stand](#aktueller-stand).
 
 ## Setup
 
@@ -41,20 +42,24 @@ vom Code aktuell auch noch nicht gelesen (siehe [Aktueller Stand](#aktueller-sta
 
 ### Scraper manuell testen
 
-`lib/letterboxd/test-scraper.ts` ruft die erste Watchlist-Seite eines fest im
-Skript eingetragenen Nutzernamens ab und gibt Länge und Anfang des HTML aus:
+`lib/letterboxd/test-scraper.ts` scrapt die vollständige Watchlist eines fest im
+Skript eingetragenen Nutzernamens und gibt die Anzahl der gefundenen Filme sowie
+den letzten Titel aus:
 
 ```bash
 npm run scrape:test
 ```
 
-Das Skript ruft nur `fetchWatchlistPage()` auf, **nicht** `parseWatchlistPage()`.
+Das Skript ruft `scrapeFullWatchlist()` auf und deckt damit die gesamte Kette ab
+(`fetchWatchlistPage()` → `parseWatchlistPage()` → Paginierung). Es hat keine
+Assertions — die Bewertung der Ausgabe bleibt manuell.
 
 ## Projektstruktur
 
 ```
 streaming-check/
 ├── app/                       # Next.js App Router
+│   ├── api/watchlist/         # angelegt, aber leer — noch kein Route Handler
 │   ├── layout.tsx             # Root-Layout
 │   ├── page.tsx               # Startseite (aktuell noch die Default-Vorlage)
 │   └── globals.css            # globale Styles (Tailwind)
@@ -84,31 +89,37 @@ Ein `components/`-Verzeichnis existiert noch nicht.
 
 ## API-Routen
 
-Aktuell existieren **keine** API-Routen. Es gibt kein `app/api/`-Verzeichnis und
-keine Route Handler. Sobald Routen hinzukommen, wird dieser Abschnitt mit Zweck,
+Aktuell existieren **keine** API-Routen. Das Verzeichnis `app/api/watchlist/` ist
+zwar angelegt, aber leer — es enthält keine `route.ts` und ist deshalb auch nicht
+von Git erfasst. Sobald Routen hinzukommen, wird dieser Abschnitt mit Zweck,
 Request-Parametern und Response-Format je Route ergänzt.
 
 ## Aktueller Stand
 
-**Funktioniert bereits:**
+**Verifiziert (lief nachweislich):**
 
 - Next.js-Grundgerüst (TypeScript, App Router, Tailwind) ist aufgesetzt.
 - Das Datenmodell in `lib/types.ts` ist definiert.
-- `parseWatchlistPage(html)` in `lib/letterboxd/scraper.ts` parst **eine** HTML-Seite
-  der Letterboxd-Watchlist und liefert eine `WatchlistItem[]`-Liste (Titel und Jahr
-  werden aus dem `data-item-name`-Attribut getrennt).
 - `fetchWatchlistPage(username, page)` lädt eine einzelne Watchlist-Seite über HTTP
   (`https://letterboxd.com/<username>/watchlist/page/<page>/`, mit gesetztem
   User-Agent) und wirft bei einer Antwort ohne `response.ok` einen `Error`.
   Manuell gegen Letterboxd getestet: Der Abruf liefert die erwartete HTML-Seite.
+- `parseWatchlistPage(html)` in `lib/letterboxd/scraper.ts` parst **eine** HTML-Seite
+  der Letterboxd-Watchlist und liefert eine `WatchlistItem[]`-Liste (Titel und Jahr
+  werden aus dem `data-item-name`-Attribut getrennt). Der Selektor
+  `[data-component-class="LazyPoster"]` greift auf echtem Letterboxd-HTML.
+- `scrapeFullWatchlist(username)` läuft ab Seite 1 in einer Schleife über
+  `fetchWatchlistPage()` + `parseWatchlistPage()`, sammelt alle `WatchlistItem`s und
+  bricht ab, sobald eine Seite keine Items mehr liefert. Begrenzt auf `MAX_PAGES = 50`,
+  zwischen den Abrufen liegt ein Delay von `DELAY_MS = 300`. Ein Lauf gegen einen
+  echten Account lieferte 236 Filme über mehrere Seiten; die Abbruchbedingung
+  „leere Seite" greift, Letterboxd antwortet jenseits der letzten Seite nicht mit 404.
 
 **Noch offen:**
 
-- Paginierung: Bisher wird immer nur genau eine angeforderte Seite geladen, es gibt
-  keine Logik, die alle Seiten einer Watchlist durchläuft.
-- End-to-End-Verprobung von Abruf **und** Parsing: `parseWatchlistPage()` wurde bisher
-  nur konzeptionell entwickelt, aber noch nicht auf echtem, abgerufenem
-  Letterboxd-HTML ausgeführt.
+- Gegenprobe, ob die gescrapte Anzahl der **tatsächlichen** Watchlist-Größe entspricht.
+  Still verworfene Einträge (siehe [Bekannte Einschränkungen](#bekannte-einschränkungen))
+  wären an der Zahl allein nicht zu erkennen.
 - TMDB-Integration: Titel-Matching (`TmdbMatch`) und Watch-Provider-Abfrage (`ProviderInfo`).
 - Abgleich der Anbieter mit den Streaming-Abos des Nutzers (`availableOnUserPlatforms`).
 - API-Routen unter `app/api/`.
@@ -116,13 +127,20 @@ Request-Parametern und Response-Format je Route ergänzt.
 
 ## Bekannte Einschränkungen
 
-- **Nur Einzelseiten-Verarbeitung:** Abruf und Parsing arbeiten jeweils auf genau
-  einer Seite; eine Paginierung über die komplette Watchlist fehlt.
+- **Paginierung deckelt bei 50 Seiten:** `scrapeFullWatchlist()` bricht nach
+  `MAX_PAGES = 50` ab und meldet das nicht — längere Watchlists werden still
+  abgeschnitten.
+- **Leere Ergebnisse sind nicht von Fehlern unterscheidbar:** `scrapeFullWatchlist()`
+  wertet „Seite liefert keine Items" als Ende der Watchlist. Ein gebrochener
+  Parser-Selektor sieht damit exakt aus wie eine leere Watchlist.
 - **Kein Error-Handling nach außen:** Unparsbare Einträge werden übersprungen
   bzw. per `console.warn` geloggt, aber nicht an eine aufrufende Schicht gemeldet.
   Filme ohne Jahresangabe im `data-item-name` fallen dabei still heraus.
 - **Kein Retry/Rate-Limiting** beim Letterboxd-Abruf. `fetchWatchlistPage()` gibt
-  sich per User-Agent als Browser aus; ob das dauerhaft trägt, ist offen.
+  sich per User-Agent als Browser aus; ob das dauerhaft trägt, ist offen. Das feste
+  Delay von 300 ms in `scrapeFullWatchlist()` ist ein gegriffener Wert, kein an
+  Letterboxd erprobtes Limit. Ein einzelner fehlgeschlagener Abruf wirft und reißt
+  den kompletten Scrape-Lauf mit.
 - **Keine automatisierten Tests:** `test-scraper.ts` ist ein manuelles Skript mit
   fest eingetragenem Nutzernamen, kein Test-Framework und keine Assertions.
 - **Kein Caching** von Letterboxd- oder TMDB-Daten.

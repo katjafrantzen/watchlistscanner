@@ -6,6 +6,105 @@ Neuester Eintrag oben. Die README beschreibt den **Ist-Stand**, diese Datei das
 
 ---
 
+## 2026-07-19 — Scraper-Kette end-to-end verifiziert
+
+**Versucht:** `test-scraper.ts` auf `scrapeFullWatchlist()` umgestellt (statt bisher
+nur `fetchWatchlistPage()`) und gegen den echten Account `katjafrantzen` laufen lassen.
+
+**Ergebnis: funktioniert.** Ausgabe des Laufs:
+
+```
+Item count:236
+Last Night in Soho
+```
+
+Damit sind **drei offene Fragen aus den Einträgen vom 18./19.07. beantwortet:**
+
+1. **Der Selektor `[data-component-class="LazyPoster"]` greift auf echtem HTML.**
+   Die Vermutung, „LazyPoster" könnte bedeuten, dass die Poster erst per JS
+   nachgeladen werden und die Attribute im gefetchten HTML fehlen, hat sich **nicht**
+   bestätigt. Die Attribute stehen im Server-HTML.
+2. **Die Paginierung terminiert sauber über die leere Seite.** Letterboxd antwortet
+   jenseits der letzten Seite offenbar mit 200 und ohne Items — nicht mit 404. Die
+   befürchtete Variante „`fetchWatchlistPage()` wirft am Ende jeder vollständigen
+   Watchlist" ist damit widerlegt: Der Lauf ging durch, ohne zu crashen.
+3. **Parser und Paginierung sind nicht mehr „geschrieben, aber nie gelaufen".**
+   Die 236 Items sind über mehrere Seiten hinweg zusammengesammelt worden, das
+   Mehrseiten-Verhalten ist also mitgetestet.
+
+Es gab **keine `console.warn`-Ausgabe**. Kein Item hatte also einen fehlenden Slug
+oder Namen.
+
+**Was der Lauf ausdrücklich *nicht* zeigt:** ob 236 die **vollständige** Watchlist ist.
+Die Zahl wurde nicht gegen die auf Letterboxd angezeigte Anzahl gegengeprüft. Die
+bekannte Schwäche aus dem 18.07.-Eintrag bleibt genau hier gefährlich: Filme, deren
+`data-item-name` nicht `Titel (Jahr)` folgt, fallen **still** heraus — ohne Warnung
+und ohne Spur in der Ausgabe. Eine zu niedrige Zahl wäre am Ergebnis nicht zu erkennen.
+Der Abgleich mit der echten Watchlist-Größe ist der nächste billige Schritt.
+
+**Weiterhin offen / unverändert:**
+- `MAX_PAGES = 50` und `DELAY_MS = 300` bleiben gegriffene Werte. Bei 236 Items wurde
+  der Deckel nicht annähernd erreicht, er ist also auch mit diesem Lauf nicht erprobt.
+- Kein Retry: Ein fehlgeschlagener Abruf reißt weiterhin den ganzen Lauf mit. Dass es
+  diesmal durchlief, belegt nur, dass 300 ms in *diesem* Lauf nicht ins Rate-Limit
+  gerannt sind — kein dauerhafter Beleg.
+- Der tote `if (items.length > 0)` vor dem `delay()` steht unverändert im Code.
+
+**Folge für die README:** Der Abschnitt „Implementiert, aber noch nie ausgeführt" und
+die Beschreibung von `test-scraper.ts` sind jetzt überholt.
+
+---
+
+## 2026-07-19 — Paginierung geschrieben, aber bewusst nicht verifiziert
+
+**Versucht:** `scrapeFullWatchlist(username)` in `lib/letterboxd/scraper.ts` —
+Schleife ab Seite 1 über `fetchWatchlistPage()` + `parseWatchlistPage()`, sammelt
+alle Items, bricht bei einer Seite ohne Items ab. Deckel `MAX_PAGES = 50`, Delay
+`DELAY_MS = 300` zwischen den Abrufen.
+
+**Ergebnis: nicht ausgeführt.** Der Code steht, ist aber nie gelaufen — weder gegen
+echtes Letterboxd-HTML noch gegen ein Fixture. `test-scraper.ts` ruft unverändert
+nur `fetchWatchlistPage()` auf. **Nicht als funktionierend behandeln.**
+
+**Warum das hier besonders wehtut:** Die offene Frage aus dem Eintrag vom 18.07. —
+ob der Selektor `[data-component-class="LazyPoster"]` auf echtem HTML überhaupt
+greift — ist weiterhin offen, und die Paginierung baut jetzt direkt darauf auf.
+Die Abbruchbedingung ist „Seite liefert 0 Items". Greift der Selektor nicht, liefert
+schon Seite 1 null Items, die Schleife bricht nach einem Durchlauf ab und
+`scrapeFullWatchlist()` gibt sauber `[]` zurück. Ein kaputter Parser und eine leere
+Watchlist sind am Rückgabewert **nicht unterscheidbar**. Wer das als „läuft, findet
+nur nichts" liest, sucht den Fehler an der falschen Stelle.
+
+**Konsequenz für später:**
+- Erst `parseWatchlistPage()` auf echtem HTML verifizieren, **dann** die Paginierung.
+  In umgekehrter Reihenfolge ist das Ergebnis nicht interpretierbar.
+- `test-scraper.ts` so erweitern, dass es die abgerufene Seite auch parst und die
+  Item-Anzahl loggt. Das ist der billigste nächste Schritt und beantwortet die
+  Selektor-Frage sofort.
+
+**Bewusst nicht gemacht:** `MAX_PAGES` und `DELAY_MS` sind gegriffene Werte. 300 ms
+sind nicht an Letterboxd erprobt, es gibt kein dokumentiertes Rate-Limit, gegen das
+sie geprüft wären. Auch kein Retry: Ein einzelner fehlgeschlagener Abruf wirft und
+reißt den ganzen Lauf mit. Beides ist für einen ersten Durchstich okay, sollte aber
+nicht als bewusst austarierte Lösung missverstanden werden.
+
+**Offene Fragen / Unsicherheiten:**
+- Erkennt Letterboxd das Seitenende überhaupt über „leere Seite"? Möglich wäre auch,
+  dass eine Seite jenseits der letzten mit 404 antwortet — dann wirft
+  `fetchWatchlistPage()`, statt dass die Schleife sauber abbricht, und
+  `scrapeFullWatchlist()` würde am Ende jeder vollständigen Watchlist crashen. Nicht
+  getestet, beide Varianten sind plausibel.
+- Im Code steht vor dem `delay()` ein `if (items.length > 0)`. Die Bedingung ist an
+  dieser Stelle immer wahr — der Fall `0` hat die Schleife eine Zeile vorher schon
+  verlassen. Harmlos, aber toter Code; vermutlich war ein „nicht nach der letzten
+  Seite warten" gemeint, das so nicht greift.
+
+**Nebenbefund:** `app/api/watchlist/` existiert als leeres Verzeichnis. Git erfasst
+leere Ordner nicht, es taucht also in keinem Commit auf. Es liegt noch keine
+`route.ts` darin.
+
+---
+
 ## 2026-07-18 — Projekt-Setup: zwei npm-Projekte aufgeräumt
 
 **Problem:** `node_modules` lag mit 1418 Dateien im Git-Repo, 1352 davon bereits auf
