@@ -6,6 +6,62 @@ Neuester Eintrag oben. Die README beschreibt den **Ist-Stand**, diese Datei das
 
 ---
 
+## 2026-07-19 — Erste API-Route: `GET /api/watchlist`
+
+**Versucht:** `app/api/watchlist/route.ts` — dünner GET-Handler, der `username`
+aus dem Query-String liest, `scrapeFullWatchlist()` aufruft und
+`{username, count, items}` als JSON zurückgibt. Ohne `username` → 400, bei einem
+Throw aus dem Scraper → 500 plus `console.error`.
+
+**Ergebnis: funktioniert — allerdings nach Aussage des Nutzers, nicht von mir
+laufen gesehen.** Ich habe die Route in dieser Session ausdrücklich *nicht*
+ausgeführt (der Nutzer hat sie selbst getestet und mich nur um die Doku gebeten).
+Für den nächsten Session-Start heißt das: „getestet" ja, aber nicht mit demselben
+Beleg wie der Scraper-Lauf vom selben Tag, wo die Ausgabe hier im Journal steht.
+**Nicht bekannt ist, welche Fälle konkret abgedeckt wurden** — ob nur der
+Happy Path oder auch der 400er und der 500er. Falls jemand das nachträglich weiß:
+hier ergänzen.
+
+**Bewusste Entscheidungen:**
+- Der Handler bleibt dünn, die Scrape-Logik bleibt in `lib/` (Konvention aus
+  CLAUDE.md). Deshalb steht in `route.ts` außer Parameter-Prüfung und
+  Fehler-Mapping nichts.
+- Die Fehlermeldung nach außen ist bewusst generisch (`"Watchlist konnte nicht
+  geladen werden"`), Details gehen nur ins Server-Log. Preisgabe der internen
+  Fehlermeldung an den Client wurde damit vermieden.
+
+**Bewusst *nicht* gemacht — und das ist die interessante Stelle:** Es gibt **keine
+Unterscheidung der Fehlerursachen.** Ein nicht existierender Letterboxd-Nutzer
+lässt `fetchWatchlistPage()` bei Seite 1 mit 404 werfen, und das landet im selben
+`catch` wie ein echter Serverfehler → 500. Fachlich wäre das ein 404. Wer später
+im Frontend „Nutzer nicht gefunden" anzeigen will, muss dafür zuerst den Fehler
+aus `scraper.ts` typisieren — am Statuscode allein ist es nicht erkennbar.
+
+Ebenfalls nicht gemacht: keine Validierung des Nutzernamens über den
+Leer-Check hinaus. `request.nextUrl.searchParams.get()` liefert bei `?username=`
+den leeren String, der über den Falsy-Check als fehlend gilt (aus dem Code
+abgeleitet, nicht ausprobiert). Ein `username` mit Sonderzeichen geht dagegen
+ungefiltert in die URL.
+
+**Zweite Altlast, die jetzt sichtbar wird:** Die Route erbt die
+Ununterscheidbarkeit aus dem Eintrag vom 19.07. — eine leere Watchlist und ein
+gebrochener Parser-Selektor liefern beide `{count: 0, items: []}` mit Status 200.
+Über HTTP ist das noch weniger sichtbar als im Skript, weil es nach einer sauberen
+Antwort aussieht. Wenn die Route eines Tages 0 Filme meldet: **zuerst den Parser
+verdächtigen, nicht den Nutzer.**
+
+**Offene Fragen / Unsicherheiten:**
+- Welche Fälle der Nutzer beim Test durchgespielt hat (siehe oben).
+- Laufzeit: Der Request scrapt synchron alle Seiten inkl. 300 ms Delay je Seite.
+  Bei 236 Filmen sind das mehrere Sekunden. Ob das in einem Deployment (Vercel:
+  Function-Timeout) noch trägt, ist nicht geprüft — lokal im Dev-Server fällt es
+  nicht auf. Das ist der wahrscheinlichste Bruchpunkt beim ersten Deploy.
+- Kein Caching: Jeder Request löst einen kompletten Scrape aus. Bei einem UI, das
+  bei jedem Reload lädt, geht das direkt in Letterboxds Rate-Limit-Risiko (das
+  ohnehin nicht erprobt ist, siehe 19.07.).
+
+---
+
 ## 2026-07-19 — Scraper-Kette end-to-end verifiziert
 
 **Versucht:** `test-scraper.ts` auf `scrapeFullWatchlist()` umgestellt (statt bisher

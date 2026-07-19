@@ -5,9 +5,9 @@ gegen die TMDB-Watch-Provider abgleicht, um zu zeigen, welche Filme über die
 eigenen Streaming-Abos verfügbar sind.
 
 > **Hinweis:** Das Projekt befindet sich in einer frühen Aufbauphase. Die
-> Datenmodelle und die komplette Scraper-Kette (HTTP-Abruf, Parsing, Paginierung
-> über alle Seiten) stehen und sind gegen echtes Letterboxd getestet; die
-> eigentliche App (UI und API) ist aber noch nicht implementiert. Siehe
+> Datenmodelle, die komplette Scraper-Kette (HTTP-Abruf, Parsing, Paginierung
+> über alle Seiten) und eine erste API-Route stehen und sind gegen echtes
+> Letterboxd getestet; TMDB-Anbindung und UI fehlen noch. Siehe
 > [Aktueller Stand](#aktueller-stand).
 
 ## Setup
@@ -59,7 +59,7 @@ Assertions — die Bewertung der Ausgabe bleibt manuell.
 ```
 streaming-check/
 ├── app/                       # Next.js App Router
-│   ├── api/watchlist/         # angelegt, aber leer — noch kein Route Handler
+│   ├── api/watchlist/route.ts # GET-Route: Watchlist eines Nutzers als JSON
 │   ├── layout.tsx             # Root-Layout
 │   ├── page.tsx               # Startseite (aktuell noch die Default-Vorlage)
 │   └── globals.css            # globale Styles (Tailwind)
@@ -89,10 +89,41 @@ Ein `components/`-Verzeichnis existiert noch nicht.
 
 ## API-Routen
 
-Aktuell existieren **keine** API-Routen. Das Verzeichnis `app/api/watchlist/` ist
-zwar angelegt, aber leer — es enthält keine `route.ts` und ist deshalb auch nicht
-von Git erfasst. Sobald Routen hinzukommen, wird dieser Abschnitt mit Zweck,
-Request-Parametern und Response-Format je Route ergänzt.
+### `GET /api/watchlist`
+
+Scrapt die vollständige Letterboxd-Watchlist eines Nutzers und gibt sie als JSON
+zurück. Der Handler ist dünn: er liest den Query-Parameter, ruft
+`scrapeFullWatchlist()` auf und mappt Fehler auf Statuscodes.
+
+**Request-Parameter** (Query-String):
+
+| Parameter  | Pflicht | Bedeutung                  |
+| ---------- | ------- | -------------------------- |
+| `username` | ja      | Letterboxd-Nutzername      |
+
+Beispiel: `GET /api/watchlist?username=katjafrantzen`
+
+**Response 200:**
+
+```jsonc
+{
+  "username": "katjafrantzen",
+  "count": 236,
+  "items": [
+    { "letterboxdSlug": "last-night-in-soho", "title": "Last Night in Soho", "year": 2021 }
+  ]
+}
+```
+
+`items` ist eine Liste von `WatchlistItem` (siehe [Datenmodell](#datenmodell-libtypests)),
+`count` entspricht `items.length`.
+
+**Fehlerfälle:**
+
+| Status | Body                                                | Wann                                          |
+| ------ | --------------------------------------------------- | --------------------------------------------- |
+| 400    | `{ "error": "Query-Parameter 'username' fehlt" }`   | `username` fehlt oder ist leer                |
+| 500    | `{ "error": "Watchlist konnte nicht geladen werden" }` | `scrapeFullWatchlist()` wirft (Details nur im Server-Log) |
 
 ## Aktueller Stand
 
@@ -114,6 +145,9 @@ Request-Parametern und Response-Format je Route ergänzt.
   zwischen den Abrufen liegt ein Delay von `DELAY_MS = 300`. Ein Lauf gegen einen
   echten Account lieferte 236 Filme über mehrere Seiten; die Abbruchbedingung
   „leere Seite" greift, Letterboxd antwortet jenseits der letzten Seite nicht mit 404.
+- `GET /api/watchlist?username=...` in `app/api/watchlist/route.ts` gibt die
+  gescrapte Watchlist als JSON zurück (siehe [API-Routen](#api-routen)) und
+  antwortet mit 400 ohne `username` bzw. 500, wenn der Scrape wirft.
 
 **Noch offen:**
 
@@ -122,8 +156,9 @@ Request-Parametern und Response-Format je Route ergänzt.
   wären an der Zahl allein nicht zu erkennen.
 - TMDB-Integration: Titel-Matching (`TmdbMatch`) und Watch-Provider-Abfrage (`ProviderInfo`).
 - Abgleich der Anbieter mit den Streaming-Abos des Nutzers (`availableOnUserPlatforms`).
-- API-Routen unter `app/api/`.
-- UI: `app/page.tsx` ist noch die unveränderte `create-next-app`-Vorlage.
+- Weitere API-Routen (TMDB-Matching, Provider-Abfrage, kombiniertes `MovieResult`).
+- UI: `app/page.tsx` ist noch die unveränderte `create-next-app`-Vorlage und ruft
+  `/api/watchlist` nicht auf.
 
 ## Bekannte Einschränkungen
 
@@ -141,6 +176,15 @@ Request-Parametern und Response-Format je Route ergänzt.
   Delay von 300 ms in `scrapeFullWatchlist()` ist ein gegriffener Wert, kein an
   Letterboxd erprobtes Limit. Ein einzelner fehlgeschlagener Abruf wirft und reißt
   den kompletten Scrape-Lauf mit.
+- **`/api/watchlist` unterscheidet Fehlerursachen nicht:** Jeder Fehler aus
+  `scrapeFullWatchlist()` wird zu einem 500 mit derselben Meldung. Ein nicht
+  existierender Nutzername (Letterboxd antwortet mit 404, `fetchWatchlistPage()`
+  wirft) sieht damit von außen aus wie ein Serverfehler; der eigentliche Grund
+  steht nur im Server-Log.
+- **`/api/watchlist` antwortet erst nach dem kompletten Scrape:** Der Request
+  läuft synchron über alle Watchlist-Seiten inklusive 300 ms Delay pro Seite —
+  bei langen Watchlists dauert die Antwort entsprechend. Kein Streaming, keine
+  Teilergebnisse, kein Timeout.
 - **Keine automatisierten Tests:** `test-scraper.ts` ist ein manuelles Skript mit
   fest eingetragenem Nutzernamen, kein Test-Framework und keine Assertions.
 - **Kein Caching** von Letterboxd- oder TMDB-Daten.
