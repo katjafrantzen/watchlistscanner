@@ -7,7 +7,6 @@ export interface WatchlistItem {
 export interface TmdbMatch {
     tmdbId: number;
     matchedTitle: string;
-    confidence: number;
     posterUrl: string;
 }
 

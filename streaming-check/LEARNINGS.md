@@ -6,6 +6,70 @@ Neuester Eintrag oben. Die README beschreibt den **Ist-Stand**, diese Datei das
 
 ---
 
+## 2026-07-21 — `searchMovieId()` gegen echtes TMDB verifiziert
+
+**Versucht:** `lib/tmdb/match.ts` testbar gemacht und ausgeführt. Zwei Dinge standen
+dem im Weg: `searchMovieId()` war **nicht exportiert** (von außen nicht aufrufbar),
+und es gab **keine `.env`-Datei** im Projekt — weder im Repo-Root noch in
+`streaming-check/`. `getAuthHeaders()` wirft ohne Token sofort.
+
+Vorgehen nach dem Muster des Scrapers: kein Test-Framework, sondern ein
+`tsx`-Skript `lib/tmdb/test-match.ts` mit drei Fällen (zwei echte Titel, ein
+Fantasietitel für den Leerpfad), jeder Fall in eigenem `try/catch`, damit ein
+Fehlschlag die übrigen nicht mitreißt. Neues Skript `match:test` in der
+`package.json`, mit `--env-file=.env.local` — Node 24 kann das nativ, und
+`next dev` lädt die Datei nur im Server-Kontext, nicht für ein Standalone-Skript.
+
+**Ergebnis: funktioniert, selbst laufen gesehen.** Zwei Läufe:
+
+1. Ohne Token, um die Verdrahtung zu prüfen — dreimal
+   `TMDB_READ_ACCESS_TOKEN is not set in environment variables.` Damit waren Import,
+   Export und Compile belegt, bevor überhaupt ein Netz-Call stattfand.
+2. Nach Anlegen von `.env.local` durch den Nutzer:
+
+```
+OK   "Last Night in Soho" (2021) -> { tmdbId: 576845, ... }
+OK   "Dune" (2021) -> { tmdbId: 438631, ... }
+FAIL "Ein Film, den es nicht gibt xyzzy" (1999) -> Keine TMDB-Ergebnisse gefunden
+```
+
+Damit ist **verifiziert:** Der Read Access Token wird als `Bearer` akzeptiert (kein
+401), die Query-Parameter sind gültig, die Response enthält `id`, `title` und
+`poster_path` in der erwarteten Form, die Poster-URL wird korrekt zusammengesetzt,
+und der `throw` bei leerem `results` greift mit lesbarer Meldung.
+
+Das `FAIL` in Zeile 3 ist der **erwartete** Pfad. Die Beschriftung im Skript sagt
+„Exception geflogen", nicht „Test fehlgeschlagen" — beim nächsten Lesen nicht als
+Defekt missverstehen.
+
+**Was der Lauf ausdrücklich *nicht* zeigt:** ob `results[0]` bei mehrdeutigen Titeln
+der richtige Film ist. „Dune" (2021) hat sauber getroffen, obwohl es auch die
+1984er-Verfilmung gibt — das ist **ein Datenpunkt, kein Beleg**. Ob der
+`year`-Parameter bei TMDB hart filtert oder nur die Sortierung beeinflusst, ist
+**angenommen, nicht geprüft**. Ein Remake-Titel wie „The Thing" wäre der ehrlichere
+Test und ist der billigste nächste Schritt.
+
+**Bewusst *nicht* gemacht:** `searchMovieId()` **wirft**, statt `null` zu liefern,
+wenn nichts gefunden wird. Für den Einzelaufruf ist das in Ordnung. Sobald die
+Funktion über die volle Watchlist läuft (236 Filme, siehe 19.07.), reißt **ein
+einziger Nicht-Treffer den ganzen Lauf mit** — und Nicht-Treffer sind dort zu
+erwarten, weil der Letterboxd-Parser Titel im Format `Titel (Jahr)` liefert, das
+nicht zwingend TMDBs Schreibweise trifft. Das ist die wahrscheinlichste Bruchstelle
+beim ersten Batch-Durchlauf. Die Entscheidung Throw-vs-`null` gehört getroffen,
+*bevor* der Batch gebaut wird, nicht danach.
+
+**Offene Fragen / Unsicherheiten:**
+- Kein Rate-Limit-Verhalten erprobt. TMDB hat dokumentierte Limits; drei
+  sequentielle Calls sagen darüber nichts. Bei 236 Filmen in Folge ist das relevant,
+  hier gilt dieselbe Unsicherheit wie beim Letterboxd-Scraper.
+- `include_adult=true` steht in der Query. Ob das Absicht war, ist unklar —
+  es vergrößert den Ergebnisraum und damit das Risiko eines falschen `results[0]`.
+- Die Provider-Abfrage (`ProviderInfo`, `MovieResult` sind in `lib/types.ts` schon
+  importiert) existiert noch nicht. `match.ts` kann bisher nur suchen, nicht
+  ermitteln, wo ein Film läuft.
+
+---
+
 ## 2026-07-19 — Erste API-Route: `GET /api/watchlist`
 
 **Versucht:** `app/api/watchlist/route.ts` — dünner GET-Handler, der `username`

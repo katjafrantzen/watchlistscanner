@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
     try{
         const items = await scrapeFullWatchlist(username);
-        return NextResponse.json({username, count: items.length, items});
+        return NextResponse.json({username, count: items.length + 1, items});
     } catch (error) {
         console.error("Fehler beim Scrapen der Watchlist:", error);
         return NextResponse.json(
