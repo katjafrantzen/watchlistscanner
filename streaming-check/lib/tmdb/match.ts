@@ -14,7 +14,7 @@ function getAuthHeaders(): HeadersInit {
     };
 }
 
-export async function searchMovieId(title: string, year: number): Promise<TmdbMatch>{
+export async function searchMovie(title: string, year: number): Promise<TmdbMatch>{
     const encodedTitle = encodeURIComponent(title);
     const url = `${TMDB_BASE_URL}/search/movie?query=${encodedTitle}&include_adult=true&language=en-US&page=1&year=${String(year)}`;
     const options = {
@@ -49,3 +49,47 @@ export async function searchMovieId(title: string, year: number): Promise<TmdbMa
     };
 }
 
+function toProviderInfos(
+    providers: Array<{ provider_id: number; provider_name: string }> | undefined,
+    type: ProviderInfo['type']
+): ProviderInfo[] {
+    return (providers ?? []).map(provider => ({
+        providerId: provider.provider_id,
+        providerName: provider.provider_name,
+        type
+    }));
+}
+
+export async function searchProviders(tmdbId: number): Promise<ProviderInfo[]>{
+    const url = `${TMDB_BASE_URL}/movie/${String(tmdbId)}/watch/providers`;
+    const options = {
+        method: 'GET',
+        headers: getAuthHeaders()
+    };
+
+    const response = await fetch(url, options);
+    if(!response.ok){
+        throw new Error(`Provider search fehlgeschlagen (${response.status}) für "${String(tmdbId)}"`);
+    }
+
+    // TMDB gruppiert nach Region und darin nach Angebotsart:
+    // { results: { DE: { flatrate: [...], rent: [...], buy: [...] } } }
+    const data = await response.json() as {
+        results?: Record<string, {
+            flatrate?: Array<{ provider_id: number; provider_name: string }>;
+            rent?: Array<{ provider_id: number; provider_name: string }>;
+            buy?: Array<{ provider_id: number; provider_name: string }>;
+        }>;
+    };
+
+    const region = data.results?.[WATCH_REGION];
+    if (!region) {
+        return [];
+    }
+
+    return [
+        ...toProviderInfos(region.flatrate, 'flat'),
+        ...toProviderInfos(region.rent, 'rent'),
+        ...toProviderInfos(region.buy, 'buy')
+    ];
+}

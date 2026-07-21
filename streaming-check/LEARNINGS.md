@@ -6,6 +6,75 @@ Neuester Eintrag oben. Die README beschreibt den **Ist-Stand**, diese Datei das
 
 ---
 
+## 2026-07-21 — `searchProviders()` repariert und verifiziert
+
+**Ausgangspunkt:** Der Nutzer meldete `(0 , import_match.searchMovie) is not a
+function` beim Aufruf von `test-match.ts`. **Der Fehler war beim Nachstellen schon
+weg** — `searchMovie` ist inzwischen exportiert, der Lauf über `npm run match:test`
+lieferte die erwartete Ausgabe (zwei `OK`, ein erwartetes `FAIL`). Die Meldung
+bedeutet in tsx' CJS-Ausgabe: Modul gefunden, aber der Name darin ist `undefined` —
+also ein fehlender Name, **nicht** ein falscher Pfad (das wäre
+`Cannot find module`).
+
+**Ursache im Nachhinein belegt:** Der Diff gegen HEAD zeigt, dass die Funktion dort
+noch `searchMovieId` heißt — die Umbenennung zu `searchMovie` war uncommitted.
+`test-match.ts` importierte also schon den neuen Namen, während `match.ts` noch den
+alten exportierte. Merkposten: Bei „is not a function" auf einem frischen Import
+zuerst `git diff` auf das importierte Modul, nicht den Import-Pfad verdächtigen.
+
+**Der eigentliche Fund:** Beim Draufschauen war `searchProviders()` in drei Punkten
+kaputt und **war offensichtlich nie gelaufen**:
+
+1. Die URL enthielt `movie/movie_id/watch/providers` — der Platzhalter aus der
+   TMDB-Doku stand als Literal drin, der Parameter wurde nie eingesetzt.
+2. `return data` gab das Wrapper-Objekt zurück, wo `ProviderInfo[]` deklariert war.
+3. **Die angenommene Response-Form war grundfalsch.** Der Code erwartete
+   `results` als flaches Array von `ProviderInfo`. TMDB liefert aber nach Region
+   *und* darin nach Angebotsart geschachtelt:
+   `{ results: { DE: { flatrate: [...], rent: [...], buy: [...] } } }`.
+   Das hätte also auch mit korrigierter URL nie funktioniert.
+
+Punkt 3 ist der Grund, warum `WATCH_REGION = 'DE'` deklariert, aber ungenutzt
+herumlag: An der Stelle, an der die Konstante gebraucht wird, war die Struktur
+nicht abgebildet.
+
+**Ergebnis: funktioniert, selbst laufen gesehen.** Wegwerf-Skript gegen die echte
+API, Dune (438631): 24 Provider, korrekt auf die drei Typen verteilt —
+`flat` (RTL+, HBO Max), `rent` und `buy` (Apple TV Store, Amazon Video, …).
+Unbekannte ID `999999999` → `Provider search fehlgeschlagen (404)`.
+`tsc --noEmit` sauber. Das Skript wurde danach gelöscht; es gibt **keinen
+dauerhaften Test für `searchProviders()`** — anders als bei `searchMovie`.
+Das ist eine Lücke, kein bewusster Verzicht.
+
+**Bewusste Entscheidungen:**
+- **Signatur `tmdbId: number` statt `id: string`**, passend zu `TmdbMatch.tmdbId`.
+  Das Ergebnis von `searchMovie()` geht jetzt ohne Konvertierung weiter.
+- **Region ohne Treffer → `[]`, kein Throw.** Ein Film, den es in DE nirgends legal
+  gibt, ist ein Normalzustand, kein Ausnahmefall. Passt zu
+  `MovieResult.providers: ProviderInfo[]`, das kein `null` vorsieht. Beachten: Ein
+  404 (Film unbekannt) wirft weiterhin — die beiden Fälle sind also unterscheidbar.
+- **Rohe API-Form inline im `as`-Cast**, kein eigenes Interface in `types.ts`.
+  Konsistent mit `searchMovie`, und `types.ts` bleibt frei von API-Typen. Der
+  Nutzer hat das so entschieden, nachdem ich zuerst ein Interface eingeführt hatte.
+- **`type: "flat"`, obwohl TMDB das Feld `flatrate` nennt.** Auf das bestehende
+  `ProviderInfo` gemappt, statt den Typ an TMDBs Vokabular anzupassen.
+
+**Offene Fragen / Unsicherheiten:**
+- Nur gegen **einen** Film verifiziert. Ob ein Film ganz ohne DE-Provider
+  tatsächlich `results.DE` fehlen lässt (statt eines leeren Objekts), ist
+  **angenommen, nicht geprüft** — der `[]`-Pfad ist ungetestet.
+- Provider-Einträge wie „HBO Max Amazon Channel" tauchen **zusätzlich** zum
+  Basis-Provider auf. Für `availableOnUserPlatforms` heißt das: ein naiver
+  Namensabgleich gegen die Abos des Nutzers wird zu viele oder zu wenige Treffer
+  liefern. Der Abgleich sollte über `providerId` laufen, nicht über den Namen.
+- Ein Film kann denselben Provider in mehreren Typen haben; die Funktion gibt ihn
+  dann mehrfach zurück (einmal je Typ). Das ist so gewollt, muss aber beim Zählen
+  im UI bedacht werden.
+- Die Rate-Limit-Frage verschärft sich: Der volle Durchlauf braucht jetzt **zwei**
+  Calls pro Film, bei 236 Filmen also ~472 statt 236.
+
+---
+
 ## 2026-07-21 — `searchMovieId()` gegen echtes TMDB verifiziert
 
 **Versucht:** `lib/tmdb/match.ts` testbar gemacht und ausgeführt. Zwei Dinge standen
